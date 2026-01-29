@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [.1.0] - 2026-01-29
+
+- Initial release: Composer Check Updates plugin
+
+
 ## [1.0.0] - 2026-01-29
 
 ### ✨ Features
