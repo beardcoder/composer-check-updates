@@ -1,0 +1,48 @@
+{
+    "name": "beardcoder/composer-check-updates",
+    "description": "Upgrade your composer.json dependencies to the latest versions, ignoring specified versions (inspired by npm-check-updates)",
+    "type": "composer-plugin",
+    "license": "MIT",
+    "keywords": [
+        "composer",
+        "plugin",
+        "update",
+        "upgrade",
+        "dependencies",
+        "check-updates",
+        "outdated",
+        "packages"
+    ],
+    "homepage": "https://github.com/beardcoder/composer-check-updates",
+    "authors": [
+        {
+            "name": "Beardcoder",
+            "email": "hello@beardcoder.de",
+            "homepage": "https://beardcoder.de"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/beardcoder/composer-check-updates/issues",
+        "source": "https://github.com/beardcoder/composer-check-updates"
+    },
+    "require": {
+        "php": "^8.1",
+        "composer-plugin-api": "^2.0",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "composer/composer": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Beardcoder\\ComposerCheckUpdates\\": "src/"
+        }
+    },
+    "extra": {
+        "class": "Beardcoder\\ComposerCheckUpdates\\Plugin"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
