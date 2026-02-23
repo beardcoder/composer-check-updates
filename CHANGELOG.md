@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0] - 2026-02-23
+
+- feat: add --recursive/-r option for scanning subdirectories
+- feat: add viewport scrolling to interactive selector
+- refactor: improve terminal UI with Symfony ProgressBar and extracted Output layer
+- docs: add .github/copilot-instructions.md
+- chore: release v.1.0
+- Initial release: Composer Check Updates plugin
+- Initial release: Composer Check Updates plugin
+
+
 ## [.1.0] - 2026-01-29
 
 - Initial release: Composer Check Updates plugin
