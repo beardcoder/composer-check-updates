@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Beardcoder\ComposerCheckUpdates\Service;
 
-use Netresearch\ComposerCheckUpdates\Model\PackageUpdate;
+use Beardcoder\ComposerCheckUpdates\Model\PackageUpdate;
 
 final class ComposerJsonUpdater
 {

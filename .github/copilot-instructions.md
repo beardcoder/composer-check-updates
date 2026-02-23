@@ -9,7 +9,9 @@ Composer plugin (type `composer-plugin`) that checks for outdated dependencies i
 The codebase follows a layered structure under `Beardcoder\ComposerCheckUpdates`:
 
 - **Plugin** → registers the `CommandProvider` capability with Composer
-- **Command/CheckUpdatesCommand** → orchestrates the CLI: collects packages, fetches versions, displays results, handles interactive mode and JSON output
+- **Command/CheckUpdatesCommand** → orchestrates the CLI: collects packages, fetches versions, delegates display/interaction
+- **Output/UpdatesRenderer** → grouped display (major/minor/patch) with color coding, counts, aligned columns, and summary
+- **Output/InteractiveSelector** → terminal multi-select with non-flickering rendering, stty save/restore, non-TTY fallback
 - **Service/PackageVersionChecker** → fetches versions from the Packagist API (`repo.packagist.org/p2/`), uses `curl_multi` for parallel requests (batches of 10), with in-memory cache
 - **Service/VersionComparator** → determines update type (major/minor/patch) and whether a version is newer
 - **Service/ComposerJsonUpdater** → reads/writes `composer.json` and `composer.lock`, preserving trailing newlines
