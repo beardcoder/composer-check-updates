@@ -34,12 +34,187 @@ final class CheckUpdatesCommand extends BaseCommand
             ->addOption('patch-only', null, InputOption::VALUE_NONE, 'Only show patch updates')
             ->addOption('json', null, InputOption::VALUE_NONE, 'Output results as JSON')
             ->addOption('target', 't', InputOption::VALUE_REQUIRED, 'Target version: latest, minor, patch (default: latest)')
+            ->addOption('recursive', 'r', InputOption::VALUE_NONE, 'Recursively check all composer.json files in subdirectories')
+            ->addOption('depth', null, InputOption::VALUE_REQUIRED, 'Max directory depth for --recursive (default: unlimited)')
             ->addOption('working-dir', 'd', InputOption::VALUE_REQUIRED, 'Use the given directory as working directory');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $workingDir = $input->getOption('working-dir') ?? getcwd();
+
+        if ($input->getOption('recursive')) {
+            return $this->executeRecursive($workingDir, $input, $output);
+        }
+
+        return $this->executeSingle($workingDir, $input, $output);
+    }
+
+    private function executeRecursive(string $rootDir, InputInterface $input, OutputInterface $output): int
+    {
+        $maxDepth = $input->getOption('depth') !== null ? (int) $input->getOption('depth') : null;
+        $composerFiles = $this->findComposerFiles($rootDir, $maxDepth);
+
+        if (empty($composerFiles)) {
+            $output->writeln('<error> No composer.json files found in ' . $rootDir . ' </error>');
+            return 1;
+        }
+
+        $output->writeln(sprintf(' Found <info>%d</info> composer.json file%s', count($composerFiles), count($composerFiles) !== 1 ? 's' : ''));
+        $output->writeln('');
+
+        $totalUpdates = 0;
+        $projectsWithUpdates = 0;
+        $exitCode = 0;
+        $jsonResults = [];
+
+        foreach ($composerFiles as $composerJsonPath) {
+            $projectDir = dirname($composerJsonPath);
+            $relativePath = $this->getRelativePath($rootDir, $projectDir);
+            $displayPath = $relativePath === '.' ? basename($projectDir) : $relativePath;
+
+            $output->writeln(sprintf(' <fg=white;options=bold>╔══ %s</>', $displayPath));
+
+            $result = $this->checkSingleProject($projectDir, $input, $output);
+
+            if ($input->getOption('json')) {
+                if (!empty($result['updates'])) {
+                    $jsonResults[$relativePath] = $result['updates'];
+                }
+            }
+
+            if (!empty($result['updates'])) {
+                $totalUpdates += count($result['updates']);
+                $projectsWithUpdates++;
+            }
+
+            if ($result['exitCode'] !== 0) {
+                $exitCode = 1;
+            }
+
+            $output->writeln('');
+        }
+
+        if ($input->getOption('json')) {
+            $output->writeln(json_encode($jsonResults, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            return 0;
+        }
+
+        // Summary
+        $output->writeln(sprintf(
+            ' <info>Summary:</info> %d update%s across %d of %d project%s',
+            $totalUpdates,
+            $totalUpdates !== 1 ? 's' : '',
+            $projectsWithUpdates,
+            count($composerFiles),
+            count($composerFiles) !== 1 ? 's' : '',
+        ));
+
+        return $exitCode;
+    }
+
+    /**
+     * @return array{updates: PackageUpdate[], exitCode: int}
+     */
+    private function checkSingleProject(string $projectDir, InputInterface $input, OutputInterface $output): array
+    {
+        $composerJsonPath = $projectDir . '/composer.json';
+        $composerLockPath = $projectDir . '/composer.lock';
+
+        $versionComparator = new VersionComparator();
+        $versionChecker = new PackageVersionChecker($versionComparator);
+        $jsonUpdater = new ComposerJsonUpdater();
+        $renderer = new UpdatesRenderer();
+
+        $dependencies = $jsonUpdater->readDependencies($composerJsonPath);
+        if ($dependencies === null) {
+            $output->writeln(' <error> Failed to read composer.json </error>');
+            return ['updates' => [], 'exitCode' => 1];
+        }
+
+        $lockData = $jsonUpdater->readLockFile($composerLockPath) ?? [];
+        $packages = $this->collectPackages($dependencies, $input);
+
+        if (empty($packages)) {
+            $output->writeln(' <comment>No packages to check.</comment>');
+            return ['updates' => [], 'exitCode' => 0];
+        }
+
+        $updates = $this->checkUpdates($packages, $versionChecker, $versionComparator, $lockData, $output, $input);
+
+        if (empty($updates)) {
+            $output->writeln(' <info>✓ All packages are up to date!</info>');
+            return ['updates' => [], 'exitCode' => 0];
+        }
+
+        $renderer->render($updates, $output);
+
+        if ($input->getOption('upgrade')) {
+            $this->performUpgrade($updates, $composerJsonPath, $jsonUpdater, $output);
+        }
+
+        return ['updates' => $updates, 'exitCode' => 0];
+    }
+
+    /**
+     * Find all composer.json files recursively, excluding vendor directories.
+     *
+     * @return string[]
+     */
+    private function findComposerFiles(string $rootDir, ?int $maxDepth): array
+    {
+        $files = [];
+        $this->scanDirectory($rootDir, $rootDir, $files, $maxDepth, 0);
+
+        sort($files);
+        return $files;
+    }
+
+    private function scanDirectory(string $rootDir, string $dir, array &$files, ?int $maxDepth, int $currentDepth): void
+    {
+        if ($maxDepth !== null && $currentDepth > $maxDepth) {
+            return;
+        }
+
+        $composerJson = $dir . '/composer.json';
+        if (file_exists($composerJson)) {
+            $files[] = $composerJson;
+        }
+
+        $entries = @scandir($dir);
+        if ($entries === false) {
+            return;
+        }
+
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            // Skip directories that contain dependencies or build artifacts
+            if (in_array($entry, ['vendor', 'node_modules', '.git', '.hg', '.svn'], true)) {
+                continue;
+            }
+
+            $path = $dir . '/' . $entry;
+            if (is_dir($path) && !is_link($path)) {
+                $this->scanDirectory($rootDir, $path, $files, $maxDepth, $currentDepth + 1);
+            }
+        }
+    }
+
+    private function getRelativePath(string $rootDir, string $path): string
+    {
+        $root = rtrim($rootDir, '/') . '/';
+        if (str_starts_with($path, $root)) {
+            $relative = substr($path, strlen($root));
+            return $relative === '' ? '.' : $relative;
+        }
+        return $path;
+    }
+
+    private function executeSingle(string $workingDir, InputInterface $input, OutputInterface $output): int
+    {
         $composerJsonPath = $workingDir . '/composer.json';
         $composerLockPath = $workingDir . '/composer.lock';
 

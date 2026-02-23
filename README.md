@@ -134,6 +134,21 @@ composer ccu --json
 composer ccu -d /path/to/project
 ```
 
+### Recursive Mode
+
+Check all `composer.json` files in subdirectories (skips `vendor/`, `node_modules/`, `.git/`):
+
+```bash
+# Scan all subdirectories
+composer ccu --recursive
+
+# Limit scan depth
+composer ccu -r --depth 2
+
+# Combine with other options
+composer ccu -r --minor-only --json
+```
+
 ## Options
 
 | Option | Alias | Description |
@@ -148,6 +163,8 @@ composer ccu -d /path/to/project
 | `--minor-only` | | Only show minor and patch updates |
 | `--patch-only` | | Only show patch updates |
 | `--json` | | Output results as JSON |
+| `--recursive` | `-r` | Recursively check all composer.json in subdirectories |
+| `--depth` | | Max directory depth for --recursive |
 | `--working-dir` | `-d` | Use the given directory as working directory |
 
 ## Color Legend
