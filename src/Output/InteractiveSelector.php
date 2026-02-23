@@ -6,6 +6,7 @@ namespace Beardcoder\ComposerCheckUpdates\Output;
 
 use Beardcoder\ComposerCheckUpdates\Model\PackageUpdate;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Terminal;
 
 final class InteractiveSelector
 {
@@ -13,10 +14,16 @@ final class InteractiveSelector
     private const COLOR_MINOR = 'cyan';
     private const COLOR_PATCH = 'green';
 
+    /** Lines reserved for header, footer, and margins */
+    private const CHROME_LINES = 7;
+
     private int $cursorPosition = 0;
     /** @var array<int, bool> */
     private array $selected = [];
+    /** @var array<int, int> Content line index → package index (-1 for non-package lines) */
+    private array $contentLineToIndex = [];
     private int $renderedLineCount = 0;
+    private int $scrollOffset = 0;
 
     /**
      * @param PackageUpdate[] $updates
@@ -161,6 +168,54 @@ final class InteractiveSelector
         $lines[] = ' <info>Select packages to update:</info>';
         $lines[] = '';
 
+        $contentLines = $this->buildContentLines($updates);
+        $viewportHeight = $this->getViewportHeight();
+
+        // Apply scrolling if content exceeds viewport
+        if (count($contentLines) > $viewportHeight && $viewportHeight > 0) {
+            $this->adjustScroll($contentLines, $viewportHeight);
+
+            $hasMoreAbove = $this->scrollOffset > 0;
+            $hasMoreBelow = ($this->scrollOffset + $viewportHeight) < count($contentLines);
+
+            if ($hasMoreAbove) {
+                $lines[] = ' <fg=gray>▲ ' . $this->scrollOffset . ' more above</>';
+            }
+
+            $visible = array_slice($contentLines, $this->scrollOffset, $viewportHeight);
+            array_push($lines, ...$visible);
+
+            if ($hasMoreBelow) {
+                $remaining = count($contentLines) - $this->scrollOffset - $viewportHeight;
+                $lines[] = ' <fg=gray>▼ ' . $remaining . ' more below</>';
+            }
+        } else {
+            array_push($lines, ...$contentLines);
+        }
+
+        $lines[] = '';
+        $selectedCount = count(array_filter($this->selected));
+        $lines[] = sprintf(' <comment>%d of %d selected</comment>', $selectedCount, count($updates));
+        $lines[] = '';
+        $lines[] = ' <comment>↑↓</comment> navigate  <comment>space</comment> toggle  <comment>a</comment> select all  <comment>enter</comment> confirm  <comment>q</comment> cancel';
+
+        return $lines;
+    }
+
+    /**
+     * Build the scrollable content lines (groups + packages).
+     *
+     * Each line that represents a package stores its index in $this->contentLineToIndex
+     * so scrolling can track which line the cursor is on.
+     *
+     * @param PackageUpdate[] $updates
+     * @return string[]
+     */
+    private function buildContentLines(array $updates): array
+    {
+        $lines = [];
+        $this->contentLineToIndex = [];
+
         $grouped = $this->groupByType($updates);
 
         $maxNameLen = max(array_map(fn(PackageUpdate $u) => strlen($u->name), $updates));
@@ -179,6 +234,7 @@ final class InteractiveSelector
 
             $label = ucfirst($type) . ($type === 'patch' ? ' Updates' : ' Upgrades');
             $lines[] = sprintf(' <fg=%s;options=bold>%s</>', $color, $label);
+            $this->contentLineToIndex[count($lines) - 1] = -1; // header, not a package
 
             foreach ($grouped[$type] as ['update' => $update, 'index' => $index]) {
                 $isCurrent = $index === $this->cursorPosition;
@@ -203,16 +259,58 @@ final class InteractiveSelector
                 } else {
                     $lines[] = sprintf('<fg=%s>%s</>', $color, $line);
                 }
+                $this->contentLineToIndex[count($lines) - 1] = $index;
             }
             $lines[] = '';
+            $this->contentLineToIndex[count($lines) - 1] = -1;
         }
 
-        $selectedCount = count(array_filter($this->selected));
-        $lines[] = sprintf(' <comment>%d of %d selected</comment>', $selectedCount, count($updates));
-        $lines[] = '';
-        $lines[] = ' <comment>↑↓</comment> navigate  <comment>space</comment> toggle  <comment>a</comment> select all  <comment>enter</comment> confirm  <comment>q</comment> cancel';
-
         return $lines;
+    }
+
+    private function getViewportHeight(): int
+    {
+        $terminal = new Terminal();
+        $termHeight = $terminal->getHeight();
+
+        // Reserve lines for chrome (header, footer, margins)
+        return max(5, $termHeight - self::CHROME_LINES);
+    }
+
+    /**
+     * Adjust scroll offset to keep the cursor-highlighted line visible.
+     *
+     * @param string[] $contentLines
+     */
+    private function adjustScroll(array $contentLines, int $viewportHeight): void
+    {
+        // Find the content line that contains the current cursor
+        $cursorLine = null;
+        foreach ($this->contentLineToIndex as $lineIdx => $pkgIdx) {
+            if ($pkgIdx === $this->cursorPosition) {
+                $cursorLine = $lineIdx;
+                break;
+            }
+        }
+
+        if ($cursorLine === null) {
+            return;
+        }
+
+        // Scroll up if cursor is above viewport
+        if ($cursorLine < $this->scrollOffset) {
+            // Show the group header above if possible
+            $this->scrollOffset = max(0, $cursorLine - 1);
+        }
+
+        // Scroll down if cursor is below viewport
+        if ($cursorLine >= $this->scrollOffset + $viewportHeight) {
+            $this->scrollOffset = $cursorLine - $viewportHeight + 2;
+        }
+
+        // Clamp
+        $maxOffset = max(0, count($contentLines) - $viewportHeight);
+        $this->scrollOffset = max(0, min($this->scrollOffset, $maxOffset));
     }
 
     /**
